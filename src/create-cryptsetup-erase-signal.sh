@@ -4,9 +4,8 @@ trap 'echo "Error happened. Exit with error."' ERR
 set -euo pipefail
 
 usage () {
-    echo "Usage: $0 -p <passwd> -d <block_device> [ -h | --help ]"
-    echo "Generate a SHA512 hashed password for the block device. The device should be a LUKS container."
-    echo "Once the password is entered during boot process, the corresponding encryption key will be erased from the LUKS header."
+    echo "Usage: $0 -p <passwd> [ -h | --help ]"
+    echo "Generate a SHA512 hashed password used as erasure signal"
 }
 
 # output help info first
@@ -24,14 +23,11 @@ then
 fi
 
 # parse other options
-while getopts "p:d:" opt
+while getopts "p:" opt
 do
     case "$opt" in
         p)
             PASSWD="$OPTARG"
-            ;;
-        d)
-            DEVICE="$OPTARG"
             ;;
         *)
             usage
@@ -40,13 +36,7 @@ do
     esac
 done
 
-# confirm the device is a LUKS container
-cryptsetup isLuks "$DEVICE" || {
-    echo "$DEVICE is not a LUKS container." >&2
-    exit 1
-}
-
 # append hashed passwd and device to the /etc/dracut-cryptsetup-erase-signals file
-HASH="$(openssl passwd -6 -salt "PfxSOM5uGKUQRmyL" "$PASSWD")"
-echo "$DEVICE $HASH" | tee -a /etc/dracut-cryptsetup-erase-signals
+HASH="$(openssl passwd -6 "$PASSWD")"
+echo "$HASH" | tee -a /etc/dracut-cryptsetup-erase-signals
 chmod 600 /etc/dracut-cryptsetup-erase-signals
