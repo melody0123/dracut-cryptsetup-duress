@@ -4,7 +4,7 @@ trap 'echo "Error happened. Exit with error."' ERR
 set -euo pipefail
 
 usage () {
-    echo "Usage: $0 -p <passwd> [ -h | --help ]"
+    echo "Usage: $0 [ -h | --help ]"
     echo "Generate a SHA512 hashed password used as erasure signal"
 }
 
@@ -22,21 +22,9 @@ then
     exit 1
 fi
 
-# parse other options
-while getopts "p:" opt
-do
-    case "$opt" in
-        p)
-            PASSWD="$OPTARG"
-            ;;
-        *)
-            usage
-            exit 1
-            ;;
-    esac
-done
+read -rp "Enter a passphrase used as erasure signal: " PASSWD
 
 # append hashed passwd and device to the /etc/dracut-cryptsetup-erase-signals file
-HASH="$(openssl passwd -6 "$PASSWD")"
+HASH="$(echo "$PASSWD" | openssl passwd -6 -stdin)"
 echo "$HASH" | tee -a /etc/dracut-cryptsetup-erase-signals
 chmod 600 /etc/dracut-cryptsetup-erase-signals
