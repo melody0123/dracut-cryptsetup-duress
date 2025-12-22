@@ -5,7 +5,7 @@ set -euo pipefail
 
 usage () {
     echo "Usage: $0 [ -h | --help ]"
-    echo "Generate a SHA512 hashed password used as erasure signal"
+    echo "Generate a SHA512 hashed password used as duress signal"
 }
 
 # output help info first
@@ -22,9 +22,10 @@ then
     exit 1
 fi
 
-read -rp "Enter a passphrase used as erasure signal: " PASSWD
+read -srp "Enter a passphrase used as duress signal: " PASSWD
+echo
 
-# append hashed passwd and device to the /etc/dracut-cryptsetup-erase-signals file
+# append hashed passwd and device to the /etc/dracut-cryptsetup-duress-signals file
 HASH="$(echo "$PASSWD" | openssl passwd -6 -stdin)"
-echo "$HASH" | tee -a /etc/dracut-cryptsetup-erase-signals
-chmod 600 /etc/dracut-cryptsetup-erase-signals
+echo "$HASH" | tee -a /etc/dracut-cryptsetup-duress-signals
+chmod 600 /etc/dracut-cryptsetup-duress-signals
