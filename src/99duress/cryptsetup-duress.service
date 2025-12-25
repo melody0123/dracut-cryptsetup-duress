@@ -15,7 +15,4 @@ RemainAfterExit=no
 TimeoutSec=infinity
 KeyringMode=shared
 OOMScoreAdjust=500
-# StandardInput=tty-force
-# StandardOutput=inherit
-# StandardError=inherit
 ExecStart=/usr/bin/cryptsetup-duress-hook.sh

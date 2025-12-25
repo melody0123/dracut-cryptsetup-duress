@@ -1,8 +1,16 @@
 #!/bin/bash
 
 check() {
-    # include this model if duress signal is registered
+    # include this module if duress signal is registered
     if [ -f /etc/dracut-cryptsetup-duress-signals ]
+    then
+        return 0
+    else
+        return 1
+    fi
+
+    # include this module if duress mode is chosen
+    if [ -f /etc/dracut-cryptsetup-duress-mode ]
     then
         return 0
     else
@@ -11,12 +19,13 @@ check() {
 }
 
 depends() {
-    echo bash systemd systemd-ask-password systemd-cryptsetup crypt
+    echo bash systemd systemd-ask-password systemd-cryptsetup crypt # tpm2-tss
 }
 
 install() {
-    # userspace utility to register duress signal
+    # registered duress signal and mode
     inst /etc/dracut-cryptsetup-duress-signals /etc/dracut-cryptsetup-duress-signals
+    inst /etc/dracut-cryptsetup-duress-mode /etc/dracut-cryptsetup-duress-mode
 
     # luks mapper name for rootfs and disk model
     local _crypttab_path
@@ -41,7 +50,7 @@ install() {
     inst "$moddir/cryptsetup-duress-hook.sh" /usr/bin/cryptsetup-duress-hook.sh
     
     # binary utilities used by duress script
-    inst_multiple openssl cut sleep cryptsetup head keyctl
+    inst_multiple openssl cut sleep cryptsetup head keyctl # tpm2 tpm2_clear
 
     # install systemd service
     inst_simple "$moddir/cryptsetup-duress.service" \

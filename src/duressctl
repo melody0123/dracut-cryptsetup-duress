@@ -1,0 +1,111 @@
+#!/bin/bash
+
+trap 'echo "Error happened. Exit with error."' ERR
+set -euo pipefail
+
+usage () {
+    echo "Usage: $0 <command> [ argument ] [ -h | --help ]"
+    echo
+    echo "  <commands>:"
+    echo "    add: add a new duress signal to /etc/dracut-cryptsetup-duress-signals, no argument"
+    echo "    mode: change mode. Valid modes (as argument) are passphrase and tpm. Specify multiple modes by separate them with comma"
+    echo
+    echo "  -h, --help: print this help info and exit"
+}
+
+# output help info first
+if [[ " $* " =~ " -h " || " $* " =~ " --help " ]]
+then
+    usage
+    exit 0
+fi
+
+# check privilige level 
+if [[ "$EUID" -ne 0 ]]
+then
+    echo "This script should be run as root." >&2
+    exit 1
+fi
+
+# parse cmdline arguments
+if [[ "$#" -eq 0 ]]
+then
+    echo "Invalid invocation" >&2
+    usage >&2
+    exit 1
+fi
+
+case "$1" in
+    add)
+        cmd="add"
+        shift
+        ;;
+    mode)
+        cmd="mode"
+        shift
+        ;;
+    *)
+        echo "Unknown command" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
+
+if [[ "$cmd" == "add" ]]
+then
+    if [[ "$#" -ne 0 ]]
+    then
+        echo "Too many arguments" >&2
+        usage >&2
+        exit 1
+    fi
+
+    read -srp "Enter a passphrase used as duress signal: " passwd
+    echo
+
+    # append hashed passwd and device to the /etc/dracut-cryptsetup-duress-signals file
+    config="/etc/dracut-cryptsetup-duress-signals"
+    hashed="$(echo "$passwd" | openssl passwd -6 -stdin)"
+    echo "$hashed" | tee -a "$config"
+    chmod 600 "$config"
+fi
+
+if [[ "$cmd" == "mode" ]]
+then
+    if [[ "$#" -ne 1 ]]
+    then
+        echo "Too many or too few arguments" >&2
+        usage >&2
+        exit 1
+    fi
+
+    config="/etc/dracut-cryptsetup-duress-mode"
+    modes="$(echo "$1" | tr "," "\n")"
+    declare -A mode_dict=(["PASSPHRASE"]="no" ["TPM"]="no")
+
+    for m in $modes
+    do
+        case "$m" in
+            passphrase)
+                mode_dict["PASSPHRASE"]="yes"
+                ;;
+            tpm)
+                mode_dict["TPM"]="yes"
+                ;;
+            *)
+                echo "Invalid mode" >&2
+                usage >&2
+                exit 1
+                ;;
+        esac
+    done
+
+    rm -f "$config"
+    for key in "${!mode_dict[@]}"
+    do
+        echo "${key}=${mode_dict[${key}]}" >> "$config"
+    done
+    chmod 600 "$config"
+fi
+
+echo "Operation complete. Please regenerate initramfs to reflect the change."

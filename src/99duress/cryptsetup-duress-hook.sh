@@ -1,6 +1,8 @@
 #!/bin/bash
 
-set -eu
+set -xeu
+
+. /etc/dracut-cryptsetup-duress-mode
 
 check_duress() {
     key_id="$(keyctl search @u user cryptsetup)"
@@ -25,11 +27,19 @@ check_duress() {
 MAPPER_NAME="$(cat /etc/dracut-cryptsetup-duress-rootfs-info | cut -d" " -f1)"
 MODEL_NAME="$(cat /etc/dracut-cryptsetup-duress-rootfs-info | cut -d" " -f2)"
 
-if [ -z "$MODEL_NAME" ]
+if [ "$PASSPHRASE" = "yes" ]
 then
-    BANNER="Please enter passphrase for disk $MAPPER_NAME"
-else
-    BANNER="Please enter passphrase for disk $MODEL_NAME ($MAPPER_NAME)"
+    if [ -z "$MODEL_NAME" ]
+    then
+        BANNER="Please enter passphrase for disk $MAPPER_NAME"
+    else
+        BANNER="Please enter passphrase for disk $MODEL_NAME ($MAPPER_NAME)"
+    fi
+fi
+
+if [ "$TPM" = "yes" ]
+then
+    BANNER="Please enter LUKS2 token PIN"
 fi
 
 systemd-ask-password --keyname="cryptsetup" --no-output "$BANNER"
@@ -40,6 +50,7 @@ then
     for dev in $DEV
     do
         cryptsetup erase -q "$dev"
-        sleep 5  # mimic latency from calc
     done
+
+    sleep 5  # mimic latency from calc
 fi

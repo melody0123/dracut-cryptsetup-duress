@@ -12,7 +12,7 @@ install:
 	sudo install -v -m 644 ./99duress/cryptsetup-duress.service /lib/dracut/modules.d/99duress/
 
 	# Install Helper Tool
-	sudo install -v -m 755 ./create-cryptsetup-duress-signal -t /usr/bin/
+	sudo install -v -m 755 ./duressctl -t /usr/bin/
 
 uninstall:
-	sudo rm -rf /lib/dracut/modules.d/99duress /usr/bin/create-cryptsetup-duress-signal /etc/dracut-cryptsetup-duress-signals
+	sudo rm -rf /lib/dracut/modules.d/99duress /usr/bin/duressctl /etc/dracut-cryptsetup-duress-signals /etc/dracut-cryptsetup-duress-mode
