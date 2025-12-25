@@ -21,14 +21,9 @@ check_duress() {
     echo 1
 }
 
-udevadm settle
-
 # get uuid and disk model name to mimic real cryptsetup prompt
-LUKS_ENTRY="$(head -1 /etc/crypttab)"
-MAPPER_NAME="$(echo "$LUKS_ENTRY" | cut -d" " -f1)"
-DEV_PATH="$(echo "$LUKS_ENTRY" | cut -d" " -f2)"
-REAL_DEV="$(readlink -f "$DEV_PATH" || echo "")"
-MODEL_NAME="$(udevadm info --query=property --property=ID_MODEL --value --name="$REAL_DEV" || echo "")"
+MAPPER_NAME="$(cat /etc/dracut-cryptsetup-duress-rootfs-info | cut -d" " -f1)"
+MODEL_NAME="$(cat /etc/dracut-cryptsetup-duress-rootfs-info | cut -d" " -f2)"
 
 if [ -z "$MODEL_NAME" ]
 then
@@ -37,7 +32,7 @@ else
     BANNER="Please enter passphrase for disk $MODEL_NAME ($MAPPER_NAME)"
 fi
 
-systemd-ask-password --keyname="cryptsetup" "$BANNER"
+systemd-ask-password --keyname="cryptsetup" --no-output "$BANNER"
 
 if [ "$(check_duress)" -eq 0 ]
 then

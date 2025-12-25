@@ -1,7 +1,13 @@
 #!/bin/bash
 
 check() {
-    return 0
+    # include this model if duress signal is registered
+    if [ -f /etc/dracut-cryptsetup-duress-signals ]
+    then
+        return 0
+    else
+        return 1
+    fi
 }
 
 depends() {
@@ -9,17 +15,37 @@ depends() {
 }
 
 install() {
+    # userspace utility to register duress signal
     inst /etc/dracut-cryptsetup-duress-signals /etc/dracut-cryptsetup-duress-signals
+
+    # luks mapper name for rootfs and disk model
+    local _crypttab_path
+    _crypttab_path="$initdir/etc/crypttab"
+
+    if [ -f "$_crypttab_path" ]
+    then
+        local _mapper_name
+        _mapper_name="$(head -1 "$_crypttab_path" | awk '{ print $1 }' )"
+    fi
+
+    # backing device model name
+    local _dev_model
+    local _dev_file
+    _dev_file="$(cryptsetup status /dev/mapper/"$_mapper_name" | grep "device" | awk '{ print $2 }')"
+    _dev_model="$(udevadm info --query=property --property=ID_MODEL --value --name="$_dev_file")"
+
+    # save to initramfs
+    echo "$_mapper_name $_dev_model" > "$initdir"/etc/dracut-cryptsetup-duress-rootfs-info
+
+    # initramfs-time script run by systemd service. logic of duress signal
     inst "$moddir/cryptsetup-duress-hook.sh" /usr/bin/cryptsetup-duress-hook.sh
     
-    inst_multiple openssl cut sleep cryptsetup udevadm keyctl head readlink
+    # binary utilities used by duress script
+    inst_multiple openssl cut sleep cryptsetup head keyctl
 
-    # 3. Install Systemd Service
+    # install systemd service
     inst_simple "$moddir/cryptsetup-duress.service" \
         /usr/lib/systemd/system/cryptsetup-duress.service
-
-    # 4. Enable the Service
-    # We manually create the symlink to start it during early boot (sysinit)
     mkdir -p "$initdir/usr/lib/systemd/system/sysinit.target.wants"
     ln_r "/usr/lib/systemd/system/cryptsetup-duress.service" \
          "/usr/lib/systemd/system/sysinit.target.wants/cryptsetup-duress.service"
