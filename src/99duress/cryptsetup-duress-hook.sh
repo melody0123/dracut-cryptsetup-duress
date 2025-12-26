@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -xeu
+set -eu
 
 . /etc/dracut-cryptsetup-duress-mode
 
