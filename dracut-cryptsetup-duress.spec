@@ -20,17 +20,17 @@ When the duress password is entered, specific actions (like header destruction) 
 
 %install
 mkdir -p %{buildroot}/usr/lib/dracut/modules.d/99duress
-cp -r * %{buildroot}/usr/lib/dracut/modules.d/99duress/
-rm -f %{buildroot}/usr/lib/dracut/modules.d/99duress/%{name}.spec
+install -m 0755 src/* %{buildroot}/usr/lib/dracut/modules.d/99duress/
 
 %files
 /usr/lib/dracut/modules.d/99duress/*
 %doc README.md
+%license LICENSE
 
 %post
 echo "----------------------------------------------------------------"
 echo "Installation successful."
-echo "Please run 'dracut -f' to regenerate your initramfs."
+echo "Please run 'dracut -f -v' to regenerate your initramfs."
 echo "----------------------------------------------------------------"
 
 %changelog
