@@ -20,7 +20,10 @@ When the duress password is entered, specific actions (like header destruction) 
 
 %install
 mkdir -p %{buildroot}/usr/lib/dracut/modules.d/99duress
-install -m 0755 src/* %{buildroot}/usr/lib/dracut/modules.d/99duress/
+install -v -m 755 src/99duress/module-setup.sh %{buildroot}/usr/lib/dracut/modules.d/99duress/
+install -v -m 755 src/99duress/cryptsetup-duress-hook.sh %{buildroot}/usr/lib/dracut/modules.d/99duress/
+install -v -m 644 src/99duress/cryptsetup-duress.service %{buildroot}/usr/lib/dracut/modules.d/99duress/
+install -v -m 755 src/duressctl -t /usr/bin/
 
 %files
 /usr/lib/dracut/modules.d/99duress/*
