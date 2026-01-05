@@ -1,111 +1,283 @@
-#!/bin/bash
+#!/usr/bin/env python3
 
-trap 'echo "Error happened. Exit with error."' ERR
-set -euo pipefail
+import argparse
+import subprocess
+import sys
+import os
+import getpass
+import re
+from pathlib import Path
 
-usage () {
-    echo "Usage: $0 <command> [ argument ] [ -h | --help ]"
-    echo
-    echo "  <commands>:"
-    echo "    add: add a new duress signal to /etc/dracut-cryptsetup-duress-signals, no argument"
-    echo "    mode: change mode. Valid modes (as argument) are passphrase and tpm. Specify multiple modes by separate them with comma"
-    echo
-    echo "  -h, --help: print this help info and exit"
-}
+# --- Configuration Constants ---
+CONFIG_SIGNALS = Path("/etc/dracut-cryptsetup-duress-signals")
+CONFIG_MODE = Path("/etc/dracut-cryptsetup-duress-mode")
+DEFAULT_START_HANDLE = 0x8100BEEF
 
-# output help info first
-if [[ " $* " =~ " -h " || " $* " =~ " --help " ]]
-then
-    usage
-    exit 0
-fi
+# --- Helper Functions ---
 
-# check privilige level 
-if [[ "$EUID" -ne 0 ]]
-then
-    echo "This script should be run as root." >&2
-    exit 1
-fi
+def check_root():
+    if os.geteuid() != 0:
+        sys.exit("Error: This script must be run as root.")
 
-# parse cmdline arguments
-if [[ "$#" -eq 0 ]]
-then
-    echo "Invalid invocation" >&2
-    usage >&2
-    exit 1
-fi
+def run_cmd(cmd, input_text=None, env=None):
+    """Runs a shell command safely. Returns stdout."""
+    # Merge current env with passed env if needed
+    current_env = os.environ.copy()
+    if env:
+        current_env.update(env)
+        
+    try:
+        result = subprocess.run(
+            cmd,
+            input=input_text,
+            capture_output=True,
+            text=True,
+            check=True,
+            env=current_env
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        # Pass through the error message from the tool
+        raise RuntimeError(f"Command failed: {' '.join(cmd)}\nSTDERR: {e.stderr.strip()}")
 
-case "$1" in
-    add)
-        cmd="add"
-        shift
-        ;;
-    mode)
-        cmd="mode"
-        shift
-        ;;
-    *)
-        echo "Unknown command" >&2
-        usage >&2
-        exit 1
-        ;;
-esac
+def get_luks_devices():
+    """Finds all partitions with TYPE='crypto_LUKS'."""
+    try:
+        output = run_cmd(["blkid", "-t", "TYPE=crypto_LUKS", "-o", "device"])
+        if not output:
+            return []
+        return output.split('\n')
+    except RuntimeError:
+        return []
 
-if [[ "$cmd" == "add" ]]
-then
-    if [[ "$#" -ne 0 ]]
-    then
-        echo "Too many arguments" >&2
-        usage >&2
-        exit 1
-    fi
+def get_persistent_handles():
+    """Returns a list of currently occupied persistent handles (as hex strings)."""
+    try:
+        # tpm2_getcap might fail if no handles exist, so we catch that.
+        output = run_cmd(["tpm2_getcap", "handles-persistent"])
+        # Extract hex codes like 0x81000001
+        return re.findall(r'0x81[0-9a-fA-F]+', output)
+    except RuntimeError:
+        return []
 
-    read -srp "Enter a passphrase used as duress signal: " passwd
-    echo
+def find_vacant_handle(start=DEFAULT_START_HANDLE):
+    """Finds the next available handle starting from 'start'."""
+    occupied = get_persistent_handles()
+    candidate = start
+    while True:
+        hex_handle = f"0x{candidate:X}"
+        if hex_handle not in occupied:
+            return hex_handle
+        candidate += 1
+        if candidate > start + 100:
+            raise RuntimeError("Could not find a vacant TPM handle after 100 attempts.")
 
-    # append hashed passwd and device to the /etc/dracut-cryptsetup-duress-signals file
-    config="/etc/dracut-cryptsetup-duress-signals"
-    hashed="$(echo "$passwd" | openssl passwd -6 -stdin)"
-    echo "$hashed" | tee -a "$config"
-    chmod 600 "$config"
-fi
+def create_storage_key(handle):
+    """
+    Creates a Restricted Storage Parent Key at the specified handle.
+    This implements the 'Disposable Parent' logic.
+    """
+    print(f"[*] Creating new Custom Storage Key at {handle}...")
+    
+    # 1. Clear any junk if it exists (safety check)
+    subprocess.run(["tpm2_evictcontrol", "-C", "o", "-c", handle], 
+                   capture_output=True, check=False) # Ignore errors if it didn't exist
 
-if [[ "$cmd" == "mode" ]]
-then
-    if [[ "$#" -ne 1 ]]
-    then
-        echo "Too many or too few arguments" >&2
-        usage >&2
-        exit 1
-    fi
+    try:
+        # 2. Create Primary (SRK) - Temporary context
+        run_cmd(["tpm2_createprimary", "-C", "o", "-g", "sha256", "-G", "rsa", "-c", "srk.ctx"])
+        
+        # 3. Create the Disposable Child
+        # Attributes: restricted|decrypt (Storage Parent), fixedTPM, fixedParent, sensitiveDataOrigin
+        run_cmd([
+            "tpm2_create", "-C", "srk.ctx", "-g", "sha256", "-G", "rsa",
+            "-u", "child.pub", "-r", "child.priv",
+            "-a", "restricted|decrypt|fixedtpm|fixedparent|sensitivedataorigin|userwithauth"
+        ])
+        
+        # 4. Load it
+        run_cmd(["tpm2_load", "-C", "srk.ctx", "-u", "child.pub", "-r", "child.priv", "-c", "child.ctx"])
+        
+        # 5. Persist it to the target handle
+        run_cmd(["tpm2_evictcontrol", "-C", "o", "-c", "child.ctx", handle])
+        
+        print(f"    -> Success. Key persisted at {handle}.")
+        
+    finally:
+        # Cleanup temporary files
+        for f in ["srk.ctx", "child.pub", "child.priv", "child.ctx"]:
+            if os.path.exists(f):
+                os.remove(f)
 
-    config="/etc/dracut-cryptsetup-duress-mode"
-    modes="$(echo "$1" | tr "," "\n")"
-    declare -A mode_dict=(["PASSPHRASE"]="no" ["TPM"]="no")
+# --- Command Handlers ---
 
-    for m in $modes
-    do
-        case "$m" in
-            passphrase)
-                mode_dict["PASSPHRASE"]="yes"
-                ;;
-            tpm)
-                mode_dict["TPM"]="yes"
-                ;;
-            *)
-                echo "Invalid mode" >&2
-                usage >&2
-                exit 1
-                ;;
-        esac
-    done
+def handle_add(args):
+    """Registers a new duress password."""
+    try:
+        passwd = getpass.getpass("Enter a passphrase used as duress signal: ")
+        if not passwd:
+            sys.exit("Error: Empty passphrase.")
+            
+        hashed = run_cmd(["openssl", "passwd", "-6", "-stdin"], input_text=passwd)
+        
+        if not CONFIG_SIGNALS.exists():
+            CONFIG_SIGNALS.touch(mode=0o600)
+        
+        with open(CONFIG_SIGNALS, "a") as f:
+            f.write(hashed + "\n")
+        
+        CONFIG_SIGNALS.chmod(0o600)
+        print(f"[*] Added new duress signal to {CONFIG_SIGNALS}")
 
-    rm -f "$config"
-    for key in "${!mode_dict[@]}"
-    do
-        echo "${key}=${mode_dict[${key}]}" >> "$config"
-    done
-    chmod 600 "$config"
-fi
+    except Exception as e:
+        sys.exit(f"Error: {e}")
 
-echo "Operation complete. Please regenerate initramfs to reflect the change."
+def handle_mode(args):
+    """Configures mode and performs TPM enrollment if requested."""
+    mode_config = {"PASSPHRASE": "no", "TPM": "no"}
+    
+    # Normalize input modes
+    raw_modes = []
+    for m in args.modes:
+        raw_modes.extend(m.split(','))
+    
+    enable_tpm = False
+    for m in raw_modes:
+        m = m.strip().lower()
+        if m == "passphrase":
+            mode_config["PASSPHRASE"] = "yes"
+        elif m == "tpm":
+            mode_config["TPM"] = "yes"
+            enable_tpm = True
+        else:
+            sys.exit(f"Error: Invalid mode '{m}'")
+
+    # --- TPM Setup Logic ---
+    if enable_tpm:
+        print("=== TPM Mode Setup ===")
+        
+        # 1. Parse PCRs
+        pcr_list = []
+        if args.pcrs:
+            pcr_list = args.pcrs.split(',')
+            print("\n[!] WARNING: You have opted to bind the key to PCRs:", args.pcrs)
+            print("    If events that can change PCRs happen (e.g., firmware/bootloader updates), the TPM will REFUSE to unlock.")
+            print("    Ensure you have a backup recovery plan.")
+            input("    Press Enter to acknowledge and continue...")
+        else:
+            print("[i] No PCRs specified. Relying on PIN + Key Existence (Standard Duress Mode).")
+
+        # 2. Check/Create Parent Key Handle
+        existing_handle = None
+        
+        # Read existing config to see if we already have a handle
+        if CONFIG_MODE.exists():
+            with open(CONFIG_MODE, 'r') as f:
+                for line in f:
+                    if line.startswith("TPM_KEY_HANDLE="):
+                        existing_handle = line.strip().split('=')[1]
+                        break
+
+        # Verify if existing handle is actually alive in the TPM
+        active_handle = None
+        if existing_handle:
+            occupied = get_persistent_handles()
+            if existing_handle in occupied:
+                print(f"[*] Found valid existing Storage Key at {existing_handle}. Re-using it.")
+                active_handle = existing_handle
+            else:
+                print(f"[!] Configured handle {existing_handle} is not in TPM. It may have been evicted.")
+
+        # If no valid handle, create a new one
+        if not active_handle:
+            active_handle = find_vacant_handle()
+            create_storage_key(active_handle)
+            # Update the config dict so it gets written later
+            mode_config["TPM_KEY_HANDLE"] = active_handle
+        else:
+            mode_config["TPM_KEY_HANDLE"] = active_handle
+
+        # 3. Enroll into LUKS
+        devices = get_luks_devices()
+        if not devices:
+            print("[!] No LUKS devices found to enroll.")
+        else:
+            print(f"[*] Detected LUKS devices: {', '.join(devices)}")
+            print("[!] IMPORTANT: Systemd requires interactive input.")
+            print("    For each device, you will be asked to:")
+            print("    1. Enter the CURRENT disk password (to unlock config).")
+            print("    2. Enter the NEW TPM PIN.")
+            print("    3. Confirm the NEW TPM PIN.")
+            print("[i] Note: If you have multiple LUKS devices and don't want to type in PIN for multiple times during boot, consider setting the same PIN for all devices.")
+            for dev in devices:
+                print(f"\n--- Enrolling {dev} ---")
+                print("You may be asked for the EXISTING disk password to authorize this change.")
+                
+                cmd = [
+                    "systemd-cryptenroll",
+                    "--tpm2-device=auto",
+                    f"--tpm2-seal-key-handle={active_handle}",
+                    "--tpm2-with-pin=yes",
+                    dev
+                ]
+                
+                # Add PCRs if specified
+                if pcr_list:
+                    cmd.append(f"--tpm2-pcrs={'+'.join(pcr_list)}")
+
+                try:
+                    # We do NOT use capture_output=True here because systemd-cryptenroll
+                    # needs to interact with the user (ask for existing disk password).
+                    # We only inject the NEW pin via env var.
+                    subprocess.run(cmd, check=True)
+                    print(f"    -> Success: {dev} enrolled with Handle {active_handle}.")
+                except subprocess.CalledProcessError:
+                    print(f"    -> FAILED to enroll {dev}. Check permissions or password.")
+
+        # 5. Final Security Warning
+        print("\n" + "="*60)
+        print("SECURITY WARNING: TPM Mode is Active")
+        print("="*60)
+        print("To maximize the effectiveness of the Duress Protocol (TPM Eviction),")
+        print("you should REMOVE other unlock methods (like passphrases) from the LUKS slots.")
+        print("If a standard passphrase slot remains, an attacker can compel you to reveal it,")
+        print("bypassing the TPM entirely.")
+        print("-" * 60)
+        print(f"Handle {active_handle} is now your kill-switch target.")
+        print("="*60)
+
+    # --- Write Config File ---
+    try:
+        with open(CONFIG_MODE, "w") as f:
+            for key, value in mode_config.items():
+                f.write(f"{key}={value}\n")
+        CONFIG_MODE.chmod(0o600)
+        print(f"\n[*] Configuration saved to {CONFIG_MODE}")
+        
+    except OSError as e:
+        sys.exit(f"Error writing config: {e}")
+
+# --- Main Entry Point ---
+
+def main():
+    parser = argparse.ArgumentParser(description="Duress Control Utility")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # Subcommand: add
+    p_add = subparsers.add_parser("add", help="Add a duress signal.")
+    p_add.set_defaults(func=handle_add)
+
+    # Subcommand: mode
+    p_mode = subparsers.add_parser("mode", help="Configure operation mode.")
+    p_mode.add_argument("modes", nargs="+", help="Modes: 'passphrase', 'tpm'")
+    p_mode.add_argument("--pcrs", help="Comma-separated list of PCRs (e.g. '0,7'). Default is None.", default=None)
+    p_mode.set_defaults(func=handle_mode)
+
+    args = parser.parse_args()
+    check_root()
+    args.func(args)
+    
+    print("\nReminder: Regenerate initramfs (dracut -f) to apply changes.")
+
+if __name__ == "__main__":
+    main()
