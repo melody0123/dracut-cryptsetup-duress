@@ -87,8 +87,11 @@ To maintain operational security (OpSec), the emergency prompt used by tool is i
 Once configured, the `initramfs` image must be regenerated to include the new module and configurations.
 
 ```shell
-sudo dracut -f -v
+sudo dracut -f -v                      # Fedora Linux
+sudo dracut -f -v <path_to_initramfs>  # Arch Linux
 ```
+
+**Note:** On Arch Linux, you may need to specify the initramfs location.
 
 **Note:** You **must** complete all configuration in order to make `dracut` include this module into initramfs.
 
