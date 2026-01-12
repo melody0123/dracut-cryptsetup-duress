@@ -8,8 +8,9 @@ url="https://github.com/melody0123/dracut-cryptsetup-duress"
 license=('GPL-3.0-or-later')
 depends=('dracut' 'cryptsetup' 'bash' 'python3' 'tpm2-tools' 'systemd' 'keyutils' 'openssl' 'coreutils')
 makedepends=('git' 'make' 'coreutils')
-source=("${pkgname}-${pkgver}.tar.gz::https://github.com/melody0123/${pkgname}/archive/refs/tags/v${pkgver}.tar.gz")
+source=("${pkgname}-${pkgver}.tar.gz")
 sha256sums=('SKIP')
+install=dracut-cryptsetup-duress.install
 
 package() {
   cd "${pkgname}-${pkgver}"
