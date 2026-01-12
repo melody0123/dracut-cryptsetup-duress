@@ -28,5 +28,5 @@ make DESTDIR=%{buildroot} install
 %license LICENSE
 
 %changelog
-* Sat Jan 03 2026 Chenglong Yu <chenglong.yu.cs@proton.me> - 0.1.0-1
+* Sat Jan 12 2026 Chenglong Yu <chenglong.yu.cs@proton.me> - 0.1.0-1
 - Initial release
