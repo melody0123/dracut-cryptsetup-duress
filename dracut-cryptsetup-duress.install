@@ -1,0 +1,13 @@
+post_install() {
+  echo "dracut-cryptsetup-duress installed."
+  echo "If you have never configured the module before,"
+  echo "you MUST first complete configuration by:"
+  echo "duressctl add"
+  echo "duressctl mode <your_chosen_mode>"
+  echo "Then regenerate your initramfs using: dracut -f -v <path_to_initramfs>"
+  echo "See README.md and duressctl --help for more information."
+}
+
+post_upgrade() {
+  post_install
+}
