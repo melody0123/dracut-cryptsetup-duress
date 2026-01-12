@@ -53,7 +53,7 @@ Packaging is still under development. We plan to support Ubuntu, Fedora and Arch
 
 **Jan 12, 2026 Update:** 
   * RPM and Pacman packages have been released on GitHub, without signature. Signature will be added in the future. Copr and AUR repositories will also be provided in the future. 
-  * Since test did not pass on Ubuntu 24.03 Desktop with Dracut, support for Debian-based distributions is still undergoing development.
+  * Since test did not pass on Ubuntu 24.04 Desktop with Dracut, support for Debian-based distributions is still undergoing development.
 
 **Note:** At this point, the module hasn't been integrated into the initramfs. You need to complete the following configuration steps and regenerate initramfs to complete the integration.
 
